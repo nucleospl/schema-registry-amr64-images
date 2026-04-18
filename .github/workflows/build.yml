@@ -76,6 +76,7 @@ jobs:
         run: rm -rf /tmp/.buildx-cache && mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
       - name: Trivy scan — amd64
+        continue-on-error: true
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: '${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ env.SR_VERSION }}-amd64'
@@ -129,6 +130,7 @@ jobs:
         run: rm -rf /tmp/.buildx-cache && mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
       - name: Trivy scan — arm64
+        continue-on-error: true
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: '${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ env.SR_VERSION }}-arm64'

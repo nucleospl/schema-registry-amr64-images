@@ -1,14 +1,14 @@
 # Etap 1: Budowanie binarek z kodu źródłowego Confluent Schema Registry
-# Maven na ARM64 produkuje natywne JARy — bez cross-compilation.
-FROM eclipse-temurin:17-jdk-jammy AS builder
+# Używamy oficjalnego obrazu maven:3.9 — protobuf-maven-plugin wymaga Maven ≥ 3.8,
+# a apt-get install maven na Ubuntu Jammy daje tylko 3.6.3.
+FROM maven:3.9-eclipse-temurin-17 AS builder
 
 ARG SCHEMA_REGISTRY_SHA
 WORKDIR /build
 
-# Instalacja Git i Maven
+# Instalacja Git (Maven i JDK już są w obrazie bazowym)
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
-        maven \
     && rm -rf /var/lib/apt/lists/*
 
 # Klonowanie i weryfikacja SHA (odporność na tag-tampering)
@@ -45,7 +45,7 @@ LABEL org.opencontainers.image.title="Schema Registry ARM64" \
       org.opencontainers.image.description="Confluent Schema Registry zbudowany natywnie dla linux/arm64" \
       org.opencontainers.image.version="${SCHEMA_REGISTRY_VERSION}" \
       org.opencontainers.image.revision="${SCHEMA_REGISTRY_SHA}" \
-      org.opencontainers.image.source="https://github.com/nucleospl/schema-registry-amr64-images" \
+      org.opencontainers.image.source="https://github.com/nucleospl/schema-registry-arm64-images" \
       org.opencontainers.image.licenses="Apache-2.0" \
       io.confluent.schema-registry.version="${SCHEMA_REGISTRY_VERSION}"
 

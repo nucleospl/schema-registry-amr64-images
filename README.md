@@ -1,6 +1,6 @@
 # schema-registry-amr64-images
 
-Unofficial [Confluent Schema Registry](https://github.com/confluentinc/schema-registry) Docker images for `linux/amd64` and `linux/arm64`, built natively on dedicated GitHub Actions runners — no QEMU, no emulation.
+Unofficial [Confluent Schema Registry](https://github.com/confluentinc/schema-registry) Docker images with a primary focus on `linux/arm64`, built natively on a dedicated ARM64 GitHub Actions runner — no QEMU, no emulation. An `linux/amd64` image is also produced as a bonus, so the published manifest supports both architectures.
 
 Images are published to [GHCR](https://github.com/orgs/nucleospl/packages?repo_name=schema-registry-amr64-images) and signed with cosign (keyless OIDC). Each release also includes a Helm chart for installing Schema Registry on Kubernetes.
 

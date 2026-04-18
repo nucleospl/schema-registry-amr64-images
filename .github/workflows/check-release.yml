@@ -1,0 +1,97 @@
+name: Check Schema Registry Upstream Release
+
+# Sprawdza co 6h czy pojawił się nowy release Schema Registry na Docker Hub.
+# Jeśli tak — triggeruje build.yml z pinem na konkretny commit SHA.
+# Mapowanie wersji: Docker Hub tag "7.9.6" → branch "7.9.6" w confluentinc/schema-registry.
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  actions: write   # potrzebne do gh workflow run
+
+jobs:
+  check:
+    name: Check for new Schema Registry release
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.compare.outputs.new_version }}
+      version:     ${{ steps.resolve.outputs.version }}
+      sha:         ${{ steps.resolve.outputs.sha }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve latest cp-schema-registry tag z Docker Hub
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Pobierz listę tagów z Docker Hub (bez pre-release, bez suffixów .arm64/.amd64/ubi8)
+          LATEST=$(curl -sf \
+            "https://hub.docker.com/v2/repositories/confluentinc/cp-schema-registry/tags?page_size=100&ordering=last_updated" \
+            | jq -r '.results[].name' \
+            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sort -V \
+            | tail -1)
+
+          echo "Najnowszy tag Docker Hub: ${LATEST}"
+
+          if [ -z "$LATEST" ]; then
+            echo "::error::Nie udało się pobrać tagów z Docker Hub"
+            exit 1
+          fi
+
+          # Mapowanie: Docker Hub "7.9.6" → branch "7.9.6" w confluentinc/schema-registry
+          # Confluent utrzymuje branch per-wersja patch (np. 7.9.6, 7.9.6-post)
+          BRANCH_SHA=$(curl -sf \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/confluentinc/schema-registry/branches/${LATEST}" \
+            | jq -r '.commit.sha // empty')
+
+          if [ -z "$BRANCH_SHA" ]; then
+            echo "::warning::Nie znaleziono brancha '${LATEST}' w confluentinc/schema-registry — pomijam."
+            echo "version=${LATEST}" >> "$GITHUB_OUTPUT"
+            echo "sha=not_found"     >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "version=${LATEST}"      >> "$GITHUB_OUTPUT"
+          echo "sha=${BRANCH_SHA}"      >> "$GITHUB_OUTPUT"
+          echo "Pinned SHA dla ${LATEST}: ${BRANCH_SHA}"
+
+      - name: Porównaj z ostatnio zbudowaną wersją
+        id: compare
+        run: |
+          LAST_BUILT=$(jq -r '.last_built // "none"' versions.json 2>/dev/null || echo "none")
+          LATEST="${{ steps.resolve.outputs.version }}"
+          SHA="${{ steps.resolve.outputs.sha }}"
+
+          echo "Ostatnio zbudowana: ${LAST_BUILT}"
+          echo "Najnowsza upstream:  ${LATEST}"
+
+          if [ "$SHA" = "not_found" ]; then
+            echo "new_version=false" >> "$GITHUB_OUTPUT"
+            echo "Brak odpowiedniego brancha — pomijam build."
+          elif [ "$LATEST" != "$LAST_BUILT" ]; then
+            echo "new_version=true"  >> "$GITHUB_OUTPUT"
+          else
+            echo "new_version=false" >> "$GITHUB_OUTPUT"
+            echo "Wersja aktualna — build nie jest potrzebny."
+          fi
+
+      - name: Dispatch build workflow
+        if: steps.compare.outputs.new_version == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run build.yml \
+            --repo "${{ github.repository }}" \
+            -f schema_registry_version="${{ steps.resolve.outputs.version }}" \
+            -f schema_registry_sha="${{ steps.resolve.outputs.sha }}"
+          echo "Zlecono build dla ${{ steps.resolve.outputs.version }} @ ${{ steps.resolve.outputs.sha }}"

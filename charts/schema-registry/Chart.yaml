@@ -1,0 +1,20 @@
+apiVersion: v2
+name: schema-registry
+description: Confluent Schema Registry zbudowany natywnie dla linux/arm64
+type: application
+# Wersja chartu i appVersion są aktualizowane automatycznie przez build.yml
+version: 0.0.0
+appVersion: "0.0.0"
+home: https://github.com/nucleospl/schema-registry-amr64-images
+sources:
+  - https://github.com/confluentinc/schema-registry
+maintainers:
+  - name: nucleospl
+    url: https://github.com/nucleospl
+keywords:
+  - schema-registry
+  - confluent
+  - kafka
+  - arm64
+annotations:
+  artifacthub.io/license: Apache-2.0

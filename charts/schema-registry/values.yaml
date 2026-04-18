@@ -1,0 +1,153 @@
+# Default values for schema-registry (ARM64 build).
+
+## ------------------------------------------------------
+## Schema Registry
+## ------------------------------------------------------
+
+replicaCount: 1
+
+## Obraz Docker — domyślnie nasz własny GHCR ARM64 build
+image: ghcr.io/nucleospl/schema-registry-amr64-images/schema-registry
+imageTag: ""   # jeśli puste, używa .Chart.AppVersion
+imagePullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+## Ustawienia Schema Registry
+## Ref: https://docs.confluent.io/platform/current/schema-registry/configuration.html
+##
+## Konfiguracja Kafka — wymagane
+kafka:
+  bootstrapServers: ""   # np. "PLAINTEXT://kafka-headless:9092"
+
+## Port nasłuchiwania Schema Registry
+servicePort: 8081
+
+## JVM heap options
+heapOptions: "-Xms512M -Xmx512M"
+
+## Nadpisania konfiguracji Schema Registry (klucze bez prefixu SCHEMA_REGISTRY_)
+## Przykład:
+##   configurationOverrides:
+##     schema.compatibility.level: "BACKWARD"
+##     inter.instance.protocol: "http"
+configurationOverrides: {}
+
+## Dodatkowe zmienne środowiskowe
+customEnv: {}
+
+## Zasoby poda
+resources: {}
+  # limits:
+  #   cpu: 500m
+  #   memory: 768Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 512Mi
+
+## Adnotacje poda (np. dla Prometheus scrape)
+podAnnotations: {}
+
+## Labels dla poda
+podLabels: {}
+
+## Security context dla poda
+podSecurityContext:
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  runAsNonRoot: true
+
+## Security context dla kontenera
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL
+
+## Selector węzłów
+nodeSelector: {}
+
+## Tolerancje
+tolerations: []
+
+## Affinity / anty-affinity
+affinity: {}
+
+## Topologia rozłożenia podów
+topologySpreadConstraints: []
+
+## ------------------------------------------------------
+## Service
+## ------------------------------------------------------
+
+service:
+  type: ClusterIP
+  port: 8081
+  annotations: {}
+
+## ------------------------------------------------------
+## Ingress (opcjonalny)
+## ------------------------------------------------------
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: schema-registry.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+## ------------------------------------------------------
+## JMX & Prometheus
+## ------------------------------------------------------
+
+jmx:
+  port: 5555
+
+prometheus:
+  jmx:
+    enabled: false
+    image: bitnami/jmx-exporter
+    imageTag: latest
+    imagePullPolicy: IfNotPresent
+    port: 5556
+    resources: {}
+
+## ------------------------------------------------------
+## Horizontal Pod Autoscaler
+## ------------------------------------------------------
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+## ------------------------------------------------------
+## Pod Disruption Budget
+## ------------------------------------------------------
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  # maxUnavailable: 1
+
+## ------------------------------------------------------
+## ServiceAccount
+## ------------------------------------------------------
+
+serviceAccount:
+  create: false
+  name: ""
+  annotations: {}
+
+## Nadpisanie grup ID dla Release i fullname
+nameOverride: ""
+fullnameOverride: ""
+overrideGroupId: ""

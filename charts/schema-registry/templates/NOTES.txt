@@ -1,0 +1,15 @@
+Schema Registry {{ .Chart.AppVersion }} (ARM64) zainstalowany jako {{ include "schema-registry.fullname" . }}
+
+Nasłuchuje na porcie {{ .Values.servicePort }}.
+
+Kafka bootstrap servers: {{ include "schema-registry.kafka.bootstrapServers" . }}
+
+Sprawdź stan:
+  kubectl get pods -l "app.kubernetes.io/name={{ include "schema-registry.name" . }},app.kubernetes.io/instance={{ .Release.Name }}"
+
+Port-forward do lokalnego testowania:
+  kubectl port-forward svc/{{ include "schema-registry.fullname" . }} 8081:{{ .Values.service.port }}
+  curl http://localhost:8081/subjects
+
+Obraz: {{ include "schema-registry.image" . }}
+Źródło: https://github.com/nucleospl/schema-registry-amr64-images

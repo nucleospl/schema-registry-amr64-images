@@ -1,0 +1,274 @@
+name: Build Schema Registry ARM64 Image & Helm Chart
+
+# Buduje obraz Docker Schema Registry dla linux/arm64 z kodu źródłowego Confluent.
+# Używa natywnego runnera arm64 — bez QEMU, bez emulacji.
+# Kod upstream klonowany po pinowanym commit SHA (odporność na tag-tampering).
+# Obraz skanowany Trivym, pushowany do GHCR i podpisywany cosign (keyless OIDC).
+# Równolegle pakowany i publikowany Helm chart do GHCR OCI.
+
+on:
+  workflow_dispatch:
+    inputs:
+      schema_registry_version:
+        description: 'Schema Registry version tag (np. 7.9.6)'
+        required: true
+        type: string
+      schema_registry_sha:
+        description: 'Commit SHA upstream (pinned, nie tag)'
+        required: true
+        type: string
+
+permissions:
+  contents: write   # zapis versions.json + tworzenie GitHub Release
+  packages: write   # push do GHCR
+  id-token: write   # cosign keyless (OIDC)
+
+env:
+  GHCR_REGISTRY:     ghcr.io
+  IMAGE_NAMESPACE:   nucleospl/schema-registry-amr64-images
+  IMAGE_NAME:        schema-registry
+  SR_VERSION:        ${{ inputs.schema_registry_version }}
+  SR_SHA:            ${{ inputs.schema_registry_sha }}
+
+jobs:
+  # ── Job 1: Budowanie obrazu Docker ───────────────────────────────────────
+  build-image:
+    name: Build & push Docker image
+    runs-on: ubuntu-24.04-arm   # natywny arm64 — bez QEMU
+    timeout-minutes: 90
+    outputs:
+      image_digest: ${{ steps.push.outputs.digest }}
+
+    steps:
+      - name: Checkout schema-registry-amr64-images
+        uses: actions/checkout@v4
+
+      - name: Login do GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Cache warstw Dockera — przyspiesza ponowne buildy (Maven deps w BuildKit cache)
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ env.SR_VERSION }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      - name: Build Docker image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/arm64
+          push: false
+          load: true
+          tags: |
+            ${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ env.SR_VERSION }}
+            ${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}:latest
+          build-args: |
+            SCHEMA_REGISTRY_VERSION=${{ env.SR_VERSION }}
+            SCHEMA_REGISTRY_SHA=${{ env.SR_SHA }}
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+
+      # Rotacja cache — zapobiega niekontrolowanemu wzrostowi
+      - name: Rotate cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+      # ── Skanowanie Trivy (przed pushem) ──────────────────────────────────
+      - name: Trivy scan — HIGH/CRITICAL (raport, nieblokujący)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ env.SR_VERSION }}'
+          format: table
+          exit-code: '0'
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      # ── Push do GHCR ─────────────────────────────────────────────────────
+      - name: Push obrazów do GHCR
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ env.SR_VERSION }}
+            ${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}:latest
+          build-args: |
+            SCHEMA_REGISTRY_VERSION=${{ env.SR_VERSION }}
+            SCHEMA_REGISTRY_SHA=${{ env.SR_SHA }}
+          cache-from: type=local,src=/tmp/.buildx-cache
+
+      # ── Podpisywanie cosign (keyless OIDC) ───────────────────────────────
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image with cosign keyless
+        run: |
+          IMAGE="${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}"
+          DIGEST="${{ steps.push.outputs.digest }}"
+          cosign sign --yes "${IMAGE}@${DIGEST}"
+          echo "Podpisano: ${IMAGE}@${DIGEST}"
+
+  # ── Job 2: Budowanie i publikacja Helm chart (równolegle) ────────────────
+  build-chart:
+    name: Build & publish Helm chart
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Login do GHCR (dla OCI chart push)
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login \
+            ${{ env.GHCR_REGISTRY }} \
+            --username ${{ github.actor }} \
+            --password-stdin
+
+      # Aktualizacja wersji chart przed pakowaniem
+      - name: Update Chart.yaml wersje
+        run: |
+          CHART_FILE="charts/schema-registry/Chart.yaml"
+          sed -i "s/^version:.*/version: ${{ env.SR_VERSION }}/" "$CHART_FILE"
+          sed -i "s/^appVersion:.*/appVersion: \"${{ env.SR_VERSION }}\"/" "$CHART_FILE"
+          echo "Chart.yaml po aktualizacji:"
+          cat "$CHART_FILE"
+
+      - name: Helm lint
+        run: helm lint charts/schema-registry/
+
+      - name: Helm package
+        run: |
+          helm package charts/schema-registry/ --destination /tmp/charts/
+          ls -la /tmp/charts/
+
+      - name: Push chart do GHCR OCI
+        run: |
+          helm push /tmp/charts/schema-registry-${{ env.SR_VERSION }}.tgz \
+            oci://${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/charts
+          echo "Chart opublikowany: oci://${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/charts/schema-registry:${{ env.SR_VERSION }}"
+
+      - name: Upload chart jako artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: helm-chart-${{ env.SR_VERSION }}
+          path: /tmp/charts/schema-registry-${{ env.SR_VERSION }}.tgz
+
+  # ── Job 3: Finalizacja — versions.json + GitHub Release ──────────────────
+  finalize:
+    name: Update versions.json & GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-image, build-chart]
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download chart artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: helm-chart-${{ env.SR_VERSION }}
+          path: /tmp/charts/
+
+      - name: Aktualizacja versions.json
+        run: |
+          cat > versions.json <<EOF
+          {
+            "last_built":     "${{ env.SR_VERSION }}",
+            "last_built_sha": "${{ env.SR_SHA }}",
+            "built_at":       "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "registry":       "${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}",
+            "image":          "${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ env.SR_VERSION }}",
+            "chart_oci":      "oci://${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/charts/schema-registry:${{ env.SR_VERSION }}"
+          }
+          EOF
+
+      - name: Commit & push versions.json
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add versions.json
+          git diff --cached --quiet \
+            || git commit -m "chore: built Schema Registry ${{ env.SR_VERSION }} arm64 [skip ci]"
+          git push
+
+      - name: Tworzenie GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NS="${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}"
+          VER="${{ env.SR_VERSION }}"
+          SHA="${{ env.SR_SHA }}"
+          IMG="${NS}/${{ env.IMAGE_NAME }}"
+
+          {
+            echo "## Schema Registry ${VER} — ARM64 image & Helm chart"
+            echo ""
+            echo "Nieoficjalny obraz \`linux/arm64\` zbudowany z [confluentinc/schema-registry@\`${SHA:0:8}\`](https://github.com/confluentinc/schema-registry/commit/${SHA})."
+            echo ""
+            echo "### Docker image"
+            echo ""
+            echo "\`\`\`bash"
+            echo "docker pull ${IMG}:${VER}"
+            echo "\`\`\`"
+            echo ""
+            echo "### Helm chart"
+            echo ""
+            echo "\`\`\`bash"
+            echo "# Instalacja z GHCR OCI"
+            echo "helm install schema-registry oci://${NS}/charts/schema-registry --version ${VER} \\"
+            echo "  --set kafka.bootstrapServers=PLAINTEXT://kafka:9092"
+            echo "\`\`\`"
+            echo ""
+            echo "### Kubernetes (przykładowe values)"
+            echo ""
+            echo "\`\`\`yaml"
+            echo "image: ${IMG}"
+            echo "imageTag: ${VER}"
+            echo "kafka:"
+            echo "  bootstrapServers: \"PLAINTEXT://kafka:9092\""
+            echo "\`\`\`"
+            echo ""
+            echo "### Weryfikacja podpisu (cosign)"
+            echo ""
+            echo "\`\`\`bash"
+            echo "cosign verify \\"
+            echo "  --certificate-identity-regexp=\"https://github.com/nucleospl/schema-registry-amr64-images/.*\" \\"
+            echo "  --certificate-oidc-issuer=\"https://token.actions.githubusercontent.com\" \\"
+            echo "  ${IMG}:${VER}"
+            echo "\`\`\`"
+            echo ""
+            echo "### Linki"
+            echo ""
+            echo "- [Upstream branch](https://github.com/confluentinc/schema-registry/tree/${VER})"
+            echo "- [GHCR image](https://github.com/orgs/nucleospl/packages?repo_name=schema-registry-amr64-images)"
+          } > /tmp/release_notes.md
+
+          gh release create "${VER}" \
+            --repo "${{ github.repository }}" \
+            --title "Schema Registry ${VER} ARM64" \
+            --notes-file /tmp/release_notes.md \
+            --latest \
+            /tmp/charts/schema-registry-${VER}.tgz

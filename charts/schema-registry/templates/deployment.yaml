@@ -1,0 +1,146 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "schema-registry.fullname" . }}
+  labels:
+    {{- include "schema-registry.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "schema-registry.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "schema-registry.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        {{- if .Values.prometheus.jmx.enabled }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.prometheus.jmx.port | quote }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.serviceAccount.create }}
+      serviceAccountName: {{ include "schema-registry.serviceAccountName" . }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        {{- if .Values.prometheus.jmx.enabled }}
+        - name: jmx-exporter
+          image: "{{ .Values.prometheus.jmx.image }}:{{ .Values.prometheus.jmx.imageTag }}"
+          imagePullPolicy: {{ .Values.prometheus.jmx.imagePullPolicy }}
+          args:
+            - {{ .Values.prometheus.jmx.port | quote }}
+            - /etc/jmx/jmx-schema-registry-prometheus.yml
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.prometheus.jmx.port }}
+          resources:
+            {{- toYaml .Values.prometheus.jmx.resources | nindent 12 }}
+          volumeMounts:
+            - name: jmx-config
+              mountPath: /etc/jmx
+        {{- end }}
+
+        - name: schema-registry
+          image: {{ include "schema-registry.image" . | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.servicePort }}
+              protocol: TCP
+            {{- if .Values.prometheus.jmx.enabled }}
+            - name: jmx
+              containerPort: {{ .Values.jmx.port }}
+            {{- end }}
+          env:
+            - name: SCHEMA_REGISTRY_HOST_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: SCHEMA_REGISTRY_LISTENERS
+              value: "http://0.0.0.0:{{ .Values.servicePort }}"
+            - name: SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS
+              value: {{ include "schema-registry.kafka.bootstrapServers" . | quote }}
+            - name: SCHEMA_REGISTRY_KAFKASTORE_GROUP_ID
+              value: {{ include "schema-registry.groupId" . | quote }}
+            - name: SCHEMA_REGISTRY_MASTER_ELIGIBILITY
+              value: "true"
+            - name: SCHEMA_REGISTRY_HEAP_OPTS
+              value: {{ .Values.heapOptions | quote }}
+            {{- if .Values.prometheus.jmx.enabled }}
+            - name: JMX_PORT
+              value: {{ .Values.jmx.port | quote }}
+            - name: SCHEMA_REGISTRY_JMX_OPTS
+              value: >-
+                -Dcom.sun.management.jmxremote
+                -Dcom.sun.management.jmxremote.authenticate=false
+                -Dcom.sun.management.jmxremote.ssl=false
+                -Dcom.sun.management.jmxremote.port={{ .Values.jmx.port }}
+                -Dcom.sun.management.jmxremote.rmi.port={{ .Values.jmx.port }}
+                -Djava.rmi.server.hostname=127.0.0.1
+            {{- end }}
+            {{- range $key, $val := .Values.configurationOverrides }}
+            - name: SCHEMA_REGISTRY_{{ $key | replace "." "_" | upper }}
+              value: {{ $val | quote }}
+            {{- end }}
+            {{- range $key, $val := .Values.customEnv }}
+            - name: {{ $key }}
+              value: {{ $val | quote }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /subjects
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+
+      volumes:
+        {{- if .Values.prometheus.jmx.enabled }}
+        - name: jmx-config
+          configMap:
+            name: {{ include "schema-registry.fullname" . }}-jmx-configmap
+        {{- end }}
+
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

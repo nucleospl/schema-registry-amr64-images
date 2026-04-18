@@ -33,7 +33,7 @@ RUN git clone --filter=blob:none https://github.com/confluentinc/schema-registry
 RUN --mount=type=cache,target=/root/.m2 \
     mvn package -DskipTests \
         --no-transfer-progress \
-        -pl '!benchmark,!streams-integration-tests,!jacoco-aggregate-schema-registry' \
+        -pl '!benchmark,!jacoco-aggregate-schema-registry' \
         -Dcheckstyle.skip=true \
         -Dspotbugs.skip=true
 

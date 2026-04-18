@@ -20,13 +20,20 @@ RUN git clone --filter=blob:none https://github.com/confluentinc/schema-registry
     fi && \
     echo "Upstream verified at SHA: $ACTUAL"
 
-# Budowanie dystrybucji — tylko moduł package-schema-registry i jego zależności
-# Confluent public Maven repo (packages.confluent.io/maven) jest dostępne publicznie
+# Budowanie dystrybucji — tylko moduł package-schema-registry i jego zależności.
+# Confluent public Maven repo (packages.confluent.io/maven) jest dostępne publicznie.
+#
+# UWAGA: celowo NIE używamy -Dmaven.test.skip=true.
+# Moduł dek-registry zależy od kafka-schema-registry:tests JAR (test scope).
+# Ten JAR jest tworzony tylko gdy kompilowane są źródła testowe (maven.test.skip=false).
+# Samo -DskipTests pomija wykonanie testów, ale pozwala skompilować źródła testowe
+# i stworzyć test JAR lokalnie — dzięki temu dek-registry może go znaleźć w lokalnym .m2.
+#
+# Wykluczamy moduły zbędne dla runtime: benchmarki, integration tests, jacoco.
 RUN --mount=type=cache,target=/root/.m2 \
     mvn package -DskipTests \
-        -pl package-schema-registry -am \
         --no-transfer-progress \
-        -Dmaven.test.skip=true \
+        -pl '!benchmark,!streams-integration-tests,!jacoco-aggregate-schema-registry' \
         -Dcheckstyle.skip=true \
         -Dspotbugs.skip=true
 

@@ -1,103 +1,116 @@
-name: Build Schema Registry ARM64 Image & Helm Chart
+name: Build Schema Registry Multi-Arch Images & Helm Chart
 
-# Buduje obraz Docker Schema Registry dla linux/arm64 z kodu źródłowego Confluent.
-# Używa natywnego runnera arm64 — bez QEMU, bez emulacji.
+# Buduje obrazy Docker Schema Registry dla linux/amd64 i linux/arm64 z kodu źródłowego Confluent.
+# Każda platforma budowana na natywnym runnerze — bez QEMU, bez emulacji.
 # Kod upstream klonowany po pinowanym commit SHA (odporność na tag-tampering).
-# Obraz skanowany Trivym, pushowany do GHCR i podpisywany cosign (keyless OIDC).
+# Obrazy skanowane Trivym, łączone w multi-arch manifest, pushowane do GHCR i podpisywane cosign.
 # Równolegle pakowany i publikowany Helm chart do GHCR OCI.
 
 on:
   workflow_dispatch:
     inputs:
       schema_registry_version:
-        description: 'Schema Registry version tag (np. 7.9.6)'
+        description: 'Schema Registry version tag (e.g. 8.2.0)'
         required: true
         type: string
       schema_registry_sha:
-        description: 'Commit SHA upstream (pinned, nie tag)'
+        description: 'Upstream commit SHA (pinned)'
         required: true
         type: string
 
 permissions:
-  contents: write   # zapis versions.json + tworzenie GitHub Release
-  packages: write   # push do GHCR
+  contents: write   # versions.json + GitHub Release
+  packages: write   # push to GHCR
   id-token: write   # cosign keyless (OIDC)
 
 env:
-  GHCR_REGISTRY:     ghcr.io
-  IMAGE_NAMESPACE:   nucleospl/schema-registry-amr64-images
-  IMAGE_NAME:        schema-registry
-  SR_VERSION:        ${{ inputs.schema_registry_version }}
-  SR_SHA:            ${{ inputs.schema_registry_sha }}
+  GHCR_REGISTRY:   ghcr.io
+  IMAGE_NAMESPACE: nucleospl/schema-registry-amr64-images
+  IMAGE_NAME:      schema-registry
+  SR_VERSION:      ${{ inputs.schema_registry_version }}
+  SR_SHA:          ${{ inputs.schema_registry_sha }}
 
 jobs:
-  # ── Job 1: Budowanie obrazu Docker ───────────────────────────────────────
-  build-image:
-    name: Build & push Docker image
-    runs-on: ubuntu-24.04-arm   # natywny arm64 — bez QEMU
+  # ── Job 1a: Natywny build linux/amd64 ────────────────────────────────────
+  build-amd64:
+    name: Build linux/amd64
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     outputs:
-      image_digest: ${{ steps.push.outputs.digest }}
+      digest: ${{ steps.push.outputs.digest }}
 
     steps:
-      - name: Checkout schema-registry-amr64-images
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Login do GHCR
-        uses: docker/login-action@v3
+      - uses: docker/login-action@v3
         with:
           registry: ${{ env.GHCR_REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v3
 
-      # Cache warstw Dockera — przyspiesza ponowne buildy (Maven deps w BuildKit cache)
       - name: Cache Docker layers
         uses: actions/cache@v4
         with:
           path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ env.SR_VERSION }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-
+          key: amd64-buildx-${{ env.SR_VERSION }}
+          restore-keys: amd64-buildx-
 
-      - name: Build Docker image
-        id: build
+      - name: Build & push (amd64)
+        id: push
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile
-          platforms: linux/arm64
-          push: false
-          load: true
-          tags: |
-            ${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ env.SR_VERSION }}
-            ${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}:latest
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ env.SR_VERSION }}-amd64
           build-args: |
             SCHEMA_REGISTRY_VERSION=${{ env.SR_VERSION }}
             SCHEMA_REGISTRY_SHA=${{ env.SR_SHA }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
 
-      # Rotacja cache — zapobiega niekontrolowanemu wzrostowi
       - name: Rotate cache
-        run: |
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+        run: rm -rf /tmp/.buildx-cache && mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
-      # ── Skanowanie Trivy (przed pushem) ──────────────────────────────────
-      - name: Trivy scan — HIGH/CRITICAL (raport, nieblokujący)
+      - name: Trivy scan — amd64
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: '${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ env.SR_VERSION }}'
+          image-ref: '${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ env.SR_VERSION }}-amd64'
           format: table
           exit-code: '0'
           severity: CRITICAL,HIGH
           ignore-unfixed: true
 
-      # ── Push do GHCR ─────────────────────────────────────────────────────
-      - name: Push obrazów do GHCR
+  # ── Job 1b: Natywny build linux/arm64 ────────────────────────────────────
+  build-arm64:
+    name: Build linux/arm64
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: arm64-buildx-${{ env.SR_VERSION }}
+          restore-keys: arm64-buildx-
+
+      - name: Build & push (arm64)
         id: push
         uses: docker/build-push-action@v6
         with:
@@ -105,86 +118,122 @@ jobs:
           file: Dockerfile
           platforms: linux/arm64
           push: true
-          tags: |
-            ${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ env.SR_VERSION }}
-            ${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}:latest
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ env.SR_VERSION }}-arm64
           build-args: |
             SCHEMA_REGISTRY_VERSION=${{ env.SR_VERSION }}
             SCHEMA_REGISTRY_SHA=${{ env.SR_SHA }}
           cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
 
-      # ── Podpisywanie cosign (keyless OIDC) ───────────────────────────────
+      - name: Rotate cache
+        run: rm -rf /tmp/.buildx-cache && mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+      - name: Trivy scan — arm64
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ env.SR_VERSION }}-arm64'
+          format: table
+          exit-code: '0'
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+  # ── Job 2: Merge multi-arch manifest + cosign ────────────────────────────
+  merge-manifest:
+    name: Merge multi-arch manifest & sign
+    runs-on: ubuntu-latest
+    needs: [build-amd64, build-arm64]
+    timeout-minutes: 15
+    outputs:
+      digest: ${{ steps.merge.outputs.digest }}
+
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Create & push multi-arch manifest
+        id: merge
+        run: |
+          IMAGE="${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}"
+          VER="${{ env.SR_VERSION }}"
+
+          docker buildx imagetools create \
+            --tag "${IMAGE}:${VER}" \
+            --tag "${IMAGE}:latest" \
+            "${IMAGE}:${VER}-amd64" \
+            "${IMAGE}:${VER}-arm64"
+
+          # Pobierz digest manifestu (multi-arch index)
+          DIGEST=$(docker buildx imagetools inspect "${IMAGE}:${VER}" \
+            --format '{{json .Manifest}}' | jq -r '.digest')
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "Multi-arch manifest: ${IMAGE}:${VER}@${DIGEST}"
+
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
 
-      - name: Sign image with cosign keyless
+      - name: Sign multi-arch manifest with cosign keyless
         run: |
           IMAGE="${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}"
-          DIGEST="${{ steps.push.outputs.digest }}"
+          DIGEST="${{ steps.merge.outputs.digest }}"
           cosign sign --yes "${IMAGE}@${DIGEST}"
-          echo "Podpisano: ${IMAGE}@${DIGEST}"
+          echo "Signed: ${IMAGE}@${DIGEST}"
 
-  # ── Job 2: Budowanie i publikacja Helm chart (równolegle) ────────────────
+  # ── Job 3: Helm chart (równolegle z buildami) ─────────────────────────────
   build-chart:
     name: Build & publish Helm chart
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install Helm
-        uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v4
         with:
           version: 'latest'
 
-      - name: Login do GHCR (dla OCI chart push)
+      - name: Login to GHCR (Helm OCI)
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login \
             ${{ env.GHCR_REGISTRY }} \
             --username ${{ github.actor }} \
             --password-stdin
 
-      # Aktualizacja wersji chart przed pakowaniem
-      - name: Update Chart.yaml wersje
+      - name: Update Chart.yaml versions
         run: |
-          CHART_FILE="charts/schema-registry/Chart.yaml"
-          sed -i "s/^version:.*/version: ${{ env.SR_VERSION }}/" "$CHART_FILE"
-          sed -i "s/^appVersion:.*/appVersion: \"${{ env.SR_VERSION }}\"/" "$CHART_FILE"
-          echo "Chart.yaml po aktualizacji:"
-          cat "$CHART_FILE"
+          sed -i "s/^version:.*/version: ${{ env.SR_VERSION }}/" charts/schema-registry/Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"${{ env.SR_VERSION }}\"/" charts/schema-registry/Chart.yaml
 
       - name: Helm lint
         run: helm lint charts/schema-registry/
 
       - name: Helm package
-        run: |
-          helm package charts/schema-registry/ --destination /tmp/charts/
-          ls -la /tmp/charts/
+        run: helm package charts/schema-registry/ --destination /tmp/charts/
 
-      - name: Push chart do GHCR OCI
+      - name: Push chart to GHCR OCI
         run: |
           helm push /tmp/charts/schema-registry-${{ env.SR_VERSION }}.tgz \
             oci://${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/charts
-          echo "Chart opublikowany: oci://${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/charts/schema-registry:${{ env.SR_VERSION }}"
 
-      - name: Upload chart jako artifact
+      - name: Upload chart artifact
         uses: actions/upload-artifact@v4
         with:
           name: helm-chart-${{ env.SR_VERSION }}
           path: /tmp/charts/schema-registry-${{ env.SR_VERSION }}.tgz
 
-  # ── Job 3: Finalizacja — versions.json + GitHub Release ──────────────────
+  # ── Job 4: Finalizacja — versions.json + GitHub Release ──────────────────
   finalize:
     name: Update versions.json & GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-image, build-chart]
+    needs: [merge-manifest, build-chart]
     timeout-minutes: 10
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Download chart artifact
         uses: actions/download-artifact@v4
@@ -192,7 +241,7 @@ jobs:
           name: helm-chart-${{ env.SR_VERSION }}
           path: /tmp/charts/
 
-      - name: Aktualizacja versions.json
+      - name: Update versions.json
         run: |
           cat > versions.json <<EOF
           {
@@ -201,6 +250,7 @@ jobs:
             "built_at":       "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
             "registry":       "${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}",
             "image":          "${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ env.SR_VERSION }}",
+            "platforms":      ["linux/amd64", "linux/arm64"],
             "chart_oci":      "oci://${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/charts/schema-registry:${{ env.SR_VERSION }}"
           }
           EOF
@@ -211,10 +261,10 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add versions.json
           git diff --cached --quiet \
-            || git commit -m "chore: built Schema Registry ${{ env.SR_VERSION }} arm64 [skip ci]"
+            || git commit -m "chore: built Schema Registry ${{ env.SR_VERSION }} [skip ci]"
           git push
 
-      - name: Tworzenie GitHub Release
+      - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -224,9 +274,9 @@ jobs:
           IMG="${NS}/${{ env.IMAGE_NAME }}"
 
           {
-            echo "## Schema Registry ${VER} — ARM64 image & Helm chart"
+            echo "## Schema Registry ${VER} — multi-arch image & Helm chart"
             echo ""
-            echo "Nieoficjalny obraz \`linux/arm64\` zbudowany z [confluentinc/schema-registry@\`${SHA:0:8}\`](https://github.com/confluentinc/schema-registry/commit/${SHA})."
+            echo "Unofficial \`linux/amd64\` and \`linux/arm64\` images built from [confluentinc/schema-registry@\`${SHA:0:8}\`](https://github.com/confluentinc/schema-registry/commit/${SHA})."
             echo ""
             echo "### Docker image"
             echo ""
@@ -237,21 +287,11 @@ jobs:
             echo "### Helm chart"
             echo ""
             echo "\`\`\`bash"
-            echo "# Instalacja z GHCR OCI"
             echo "helm install schema-registry oci://${NS}/charts/schema-registry --version ${VER} \\"
             echo "  --set kafka.bootstrapServers=PLAINTEXT://kafka:9092"
             echo "\`\`\`"
             echo ""
-            echo "### Kubernetes (przykładowe values)"
-            echo ""
-            echo "\`\`\`yaml"
-            echo "image: ${IMG}"
-            echo "imageTag: ${VER}"
-            echo "kafka:"
-            echo "  bootstrapServers: \"PLAINTEXT://kafka:9092\""
-            echo "\`\`\`"
-            echo ""
-            echo "### Weryfikacja podpisu (cosign)"
+            echo "### Signature verification (cosign)"
             echo ""
             echo "\`\`\`bash"
             echo "cosign verify \\"
@@ -260,15 +300,15 @@ jobs:
             echo "  ${IMG}:${VER}"
             echo "\`\`\`"
             echo ""
-            echo "### Linki"
+            echo "### Links"
             echo ""
             echo "- [Upstream branch](https://github.com/confluentinc/schema-registry/tree/${VER})"
-            echo "- [GHCR image](https://github.com/orgs/nucleospl/packages?repo_name=schema-registry-amr64-images)"
+            echo "- [GHCR packages](https://github.com/orgs/nucleospl/packages?repo_name=schema-registry-amr64-images)"
           } > /tmp/release_notes.md
 
           gh release create "${VER}" \
             --repo "${{ github.repository }}" \
-            --title "Schema Registry ${VER} ARM64" \
+            --title "Schema Registry ${VER}" \
             --notes-file /tmp/release_notes.md \
             --latest \
             /tmp/charts/schema-registry-${VER}.tgz

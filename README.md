@@ -1,6 +1,6 @@
 # schema-registry-amr64-images
 
-Unofficial [Confluent Schema Registry](https://github.com/confluentinc/schema-registry) Docker images for `linux/arm64`, built natively on ARM64 GitHub Actions runners — no QEMU, no emulation.
+Unofficial [Confluent Schema Registry](https://github.com/confluentinc/schema-registry) Docker images for `linux/amd64` and `linux/arm64`, built natively on dedicated GitHub Actions runners — no QEMU, no emulation.
 
 Images are published to [GHCR](https://github.com/orgs/nucleospl/packages?repo_name=schema-registry-amr64-images) and signed with cosign (keyless OIDC). Each release also includes a Helm chart for installing Schema Registry on Kubernetes.
 
@@ -15,8 +15,9 @@ Releases are created **fully automatically**:
 1. The `check-release.yml` workflow polls Docker Hub (`confluentinc/cp-schema-registry`) **every 6 hours**
 2. When a new tag is detected (e.g. `8.3.0`), it resolves the matching branch and commit SHA in [confluentinc/schema-registry](https://github.com/confluentinc/schema-registry)
 3. It triggers `build.yml`, which:
-   - Builds the Docker image on a native ARM64 runner
-   - Scans with Trivy
+   - Builds `linux/amd64` on a native x86_64 runner and `linux/arm64` on a native ARM64 runner — in parallel
+   - Scans both images with Trivy
+   - Merges them into a single multi-arch manifest
    - Pushes to GHCR and signs with cosign
    - Packages and publishes the Helm chart to GHCR OCI
    - Creates a GitHub Release with the chart attached

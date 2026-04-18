@@ -2,7 +2,7 @@
   "last_built":     "none",
   "last_built_sha": "none",
   "built_at":       "none",
-  "registry":       "ghcr.io/nucleospl/schema-registry-amr64-images",
-  "image":          "ghcr.io/nucleospl/schema-registry-amr64-images/schema-registry:none",
-  "chart_oci":      "oci://ghcr.io/nucleospl/schema-registry-amr64-images/charts/schema-registry:none"
+  "registry":       "ghcr.io/nucleospl/schema-registry-arm64-images",
+  "image":          "ghcr.io/nucleospl/schema-registry-arm64-images/schema-registry:none",
+  "chart_oci":      "oci://ghcr.io/nucleospl/schema-registry-arm64-images/charts/schema-registry:none"
 }

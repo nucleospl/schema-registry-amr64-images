@@ -1,8 +1,8 @@
-# schema-registry-amr64-images
+# schema-registry-arm64-images
 
 Unofficial [Confluent Schema Registry](https://github.com/confluentinc/schema-registry) Docker images with a primary focus on `linux/arm64`, built natively on a dedicated ARM64 GitHub Actions runner — no QEMU, no emulation. An `linux/amd64` image is also produced as a bonus, so the published manifest supports both architectures.
 
-Images are published to [GHCR](https://github.com/orgs/nucleospl/packages?repo_name=schema-registry-amr64-images) and signed with cosign (keyless OIDC). Each release also includes a Helm chart for installing Schema Registry on Kubernetes.
+Images are published to [GHCR](https://github.com/orgs/nucleospl/packages?repo_name=schema-registry-arm64-images) and signed with cosign (keyless OIDC). Each release also includes a Helm chart for installing Schema Registry on Kubernetes.
 
 ## Why this project?
 
@@ -30,7 +30,7 @@ The first build, or a manual rebuild of a specific version, can be triggered via
 ### Docker
 
 ```bash
-docker pull ghcr.io/nucleospl/schema-registry-amr64-images/schema-registry:8.2.0
+docker pull ghcr.io/nucleospl/schema-registry-arm64-images/schema-registry:8.2.0
 ```
 
 Required environment variables:
@@ -41,14 +41,14 @@ docker run --rm \
   -e SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS=PLAINTEXT://kafka:9092 \
   -e SCHEMA_REGISTRY_LISTENERS=http://0.0.0.0:8081 \
   -p 8081:8081 \
-  ghcr.io/nucleospl/schema-registry-amr64-images/schema-registry:8.2.0
+  ghcr.io/nucleospl/schema-registry-arm64-images/schema-registry:8.2.0
 ```
 
 ### Helm chart
 
 ```bash
 helm install schema-registry \
-  oci://ghcr.io/nucleospl/schema-registry-amr64-images/charts/schema-registry \
+  oci://ghcr.io/nucleospl/schema-registry-arm64-images/charts/schema-registry \
   --version 8.2.0 \
   --set kafka.bootstrapServers=PLAINTEXT://kafka:9092
 ```
@@ -56,7 +56,7 @@ helm install schema-registry \
 Example `values.yaml`:
 
 ```yaml
-image: ghcr.io/nucleospl/schema-registry-amr64-images/schema-registry
+image: ghcr.io/nucleospl/schema-registry-arm64-images/schema-registry
 imageTag: "8.2.0"
 
 kafka:
@@ -78,9 +78,9 @@ Full list of options: [`charts/schema-registry/values.yaml`](charts/schema-regis
 
 ```bash
 cosign verify \
-  --certificate-identity-regexp="https://github.com/nucleospl/schema-registry-amr64-images/.*" \
+  --certificate-identity-regexp="https://github.com/nucleospl/schema-registry-arm64-images/.*" \
   --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
-  ghcr.io/nucleospl/schema-registry-amr64-images/schema-registry:8.2.0
+  ghcr.io/nucleospl/schema-registry-arm64-images/schema-registry:8.2.0
 ```
 
 ## Version mapping

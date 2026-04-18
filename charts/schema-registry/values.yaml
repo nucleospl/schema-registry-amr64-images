@@ -7,7 +7,7 @@
 replicaCount: 1
 
 ## Obraz Docker — domyślnie nasz własny GHCR ARM64 build
-image: ghcr.io/nucleospl/schema-registry-amr64-images/schema-registry
+image: ghcr.io/nucleospl/schema-registry-arm64-images/schema-registry
 imageTag: ""   # jeśli puste, używa .Chart.AppVersion
 imagePullPolicy: IfNotPresent
 

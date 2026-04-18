@@ -25,7 +25,7 @@ permissions:
 
 env:
   GHCR_REGISTRY:   ghcr.io
-  IMAGE_NAMESPACE: nucleospl/schema-registry-amr64-images
+  IMAGE_NAMESPACE: nucleospl/schema-registry-arm64-images
   IMAGE_NAME:      schema-registry
   SR_VERSION:      ${{ inputs.schema_registry_version }}
   SR_SHA:          ${{ inputs.schema_registry_sha }}
@@ -295,7 +295,7 @@ jobs:
             echo ""
             echo "\`\`\`bash"
             echo "cosign verify \\"
-            echo "  --certificate-identity-regexp=\"https://github.com/nucleospl/schema-registry-amr64-images/.*\" \\"
+            echo "  --certificate-identity-regexp=\"https://github.com/nucleospl/schema-registry-arm64-images/.*\" \\"
             echo "  --certificate-oidc-issuer=\"https://token.actions.githubusercontent.com\" \\"
             echo "  ${IMG}:${VER}"
             echo "\`\`\`"
@@ -303,7 +303,7 @@ jobs:
             echo "### Links"
             echo ""
             echo "- [Upstream branch](https://github.com/confluentinc/schema-registry/tree/${VER})"
-            echo "- [GHCR packages](https://github.com/orgs/nucleospl/packages?repo_name=schema-registry-amr64-images)"
+            echo "- [GHCR packages](https://github.com/orgs/nucleospl/packages?repo_name=schema-registry-arm64-images)"
           } > /tmp/release_notes.md
 
           gh release create "${VER}" \
